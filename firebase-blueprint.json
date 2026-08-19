@@ -1,0 +1,73 @@
+{
+  "$schema": "https://raw.githubusercontent.com/firebase/firebase-tools/master/schema/firestore-blueprint.json",
+  "entities": {
+    "products": {
+      "title": "3D Models Product Catalog",
+      "description": "Collection of all 3D print models available in UrPrint-3D models marketplace with configurable dimensions, scales, and materials",
+      "properties": {
+        "id": { "type": "string", "description": "Unique product ID" },
+        "name": { "type": "string", "description": "Product model name" },
+        "subtitle": { "type": "string", "description": "Short description" },
+        "category": { "type": "string", "description": "Model category" },
+        "basePrice": { "type": "number", "description": "Base price in USD" },
+        "rating": { "type": "number", "description": "Average user rating" },
+        "reviewCount": { "type": "number", "description": "Number of reviews" },
+        "images": { "type": "array", "description": "List of image URLs" },
+        "hoverImage": { "type": "string", "description": "Secondary hover image" },
+        "badges": { "type": "array", "description": "Badges like NEW, BESTSELLER" },
+        "materials": { "type": "array", "description": "Supported material options" },
+        "colors": { "type": "array", "description": "Supported color options" },
+        "sizes": { "type": "array", "description": "Preset size & scale factors" },
+        "specs": { "type": "object", "description": "Printing specifications" },
+        "detailsAccordion": { "type": "string", "description": "Detailed description" },
+        "stlGeometryType": { "type": "string", "description": "Geometry type for 3D viewer" },
+        "inStock": { "type": "boolean", "description": "Availability state" },
+        "createdAt": { "type": "string", "description": "Creation ISO timestamp" }
+      },
+      "required": ["id", "name", "category", "basePrice"]
+    },
+    "orders": {
+      "title": "Customer Orders",
+      "description": "Orders placed with items, custom scale, materials, and shipping info",
+      "properties": {
+        "id": { "type": "string", "description": "Order ID" },
+        "customer": { "type": "object", "description": "Customer contact and shipping details" },
+        "items": { "type": "array", "description": "List of ordered items with scale and material configuration" },
+        "subtotal": { "type": "number", "description": "Subtotal amount" },
+        "total": { "type": "number", "description": "Total amount" },
+        "currency": { "type": "string", "description": "Currency code (e.g. INR)" },
+        "status": { "type": "string", "description": "Order status (e.g. In Production, Shipped)" },
+        "paymentMethod": { "type": "string", "description": "Payment method used" },
+        "createdAt": { "type": "string", "description": "Order placement timestamp" }
+      },
+      "required": ["id", "customer", "items", "total"]
+    },
+    "reviews": {
+      "title": "Product Reviews",
+      "description": "User reviews for 3D models with ratings and comments",
+      "properties": {
+        "id": { "type": "string", "description": "Review ID" },
+        "productId": { "type": "string", "description": "Target product ID" },
+        "userName": { "type": "string", "description": "Reviewer name" },
+        "rating": { "type": "number", "description": "Star rating 1-5" },
+        "comment": { "type": "string", "description": "Review comment" },
+        "createdAt": { "type": "string", "description": "Review creation timestamp" }
+      },
+      "required": ["id", "productId", "userName", "rating", "comment"]
+    },
+    "customUploads": {
+      "title": "Custom STL Uploads",
+      "description": "User uploaded CAD and STL files with calculated bounding boxes and print quotes",
+      "properties": {
+        "id": { "type": "string", "description": "Upload ID" },
+        "fileName": { "type": "string", "description": "File name" },
+        "fileSizeBytes": { "type": "number", "description": "File size in bytes" },
+        "dimensions": { "type": "object", "description": "Bounding box dimensions (X, Y, Z mm)" },
+        "volumeCm3": { "type": "number", "description": "Estimated volume" },
+        "estimatedPriceUSD": { "type": "number", "description": "Calculated quote price" },
+        "createdAt": { "type": "string", "description": "Upload timestamp" }
+      },
+      "required": ["id", "fileName", "dimensions", "estimatedPriceUSD"]
+    }
+  }
+}
