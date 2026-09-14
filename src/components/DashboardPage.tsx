@@ -1098,8 +1098,24 @@ export const DashboardPage: React.FC = () => {
                           </select>
                         </td>
 
-                        <td className="py-3 px-4 text-xs font-mono uppercase text-[#8E9299]">
-                          {order.paymentMethod || 'UPI'}
+                        <td className="py-3 px-4 text-xs font-mono">
+                          {order.paymentMethod === 'razorpay' ? (
+                            <div>
+                              <span className="bg-[#0c2340] text-white px-2 py-0.5 rounded font-bold text-[10px] inline-block tracking-wide">
+                                RAZORPAY
+                              </span>
+                              {order.razorpayPaymentId && (
+                                <span
+                                  className="block text-[10px] text-emerald-800 font-mono mt-0.5 truncate max-w-[120px]"
+                                  title={order.razorpayPaymentId}
+                                >
+                                  {order.razorpayPaymentId}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="uppercase text-[#8E9299]">{order.paymentMethod || 'UPI'}</span>
+                          )}
                         </td>
 
                         <td className="py-3 px-4 font-mono font-bold text-sm text-[#2C2C2C]">

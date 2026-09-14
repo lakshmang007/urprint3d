@@ -1,6 +1,6 @@
 {
   "name": "UrPrint-3D models",
-  "description": "UrPrint-3D models - On-demand 3D printing marketplace featuring Anime Action Figures, Modern Home Decor, 3D Wall Hangings, Custom Keychains, and Instant STL File Upload for Custom Prints.",
+  "description": "UrPrint-3D models - On-demand 3D printing marketplace with Razorpay Indian payment gateway, Anime Action Figures, Modern Home Decor, 3D Wall Hangings, Custom Keychains, and Instant STL File Upload for Custom Prints.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

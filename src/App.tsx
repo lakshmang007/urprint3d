@@ -6,6 +6,7 @@ import { Footer } from './components/Footer';
 import { HeroCarousel } from './components/HeroCarousel';
 import { CategoryGrid } from './components/CategoryGrid';
 import { ProductCard } from './components/ProductCard';
+import { ProductCardSkeletonGrid } from './components/ProductCardSkeleton';
 import { CatalogPage } from './components/CatalogPage';
 import { ProductDetail } from './components/ProductDetail';
 import { CustomPrintUpload } from './components/CustomPrintUpload';
@@ -30,6 +31,7 @@ import {
   Cpu,
   Truck,
   LayoutDashboard,
+  RotateCcw,
 } from 'lucide-react';
 
 const MainContent: React.FC = () => {
@@ -39,6 +41,8 @@ const MainContent: React.FC = () => {
     setCurrentView,
     setIsPrintHubModalOpen,
     products,
+    isLoadingProducts,
+    refreshProducts,
     isManageModalOpen,
     setIsManageModalOpen,
     isFirebaseConnected,
@@ -91,6 +95,17 @@ const MainContent: React.FC = () => {
 
                   <div className="flex items-center gap-3">
                     <button
+                      id="home-refresh-catalog-btn"
+                      onClick={() => refreshProducts()}
+                      disabled={isLoadingProducts}
+                      className="inline-flex items-center gap-1.5 bg-[#F7F6F2] hover:bg-[#E5E2D9] text-[#2C2C2C] border border-[#E5E2D9] font-bold text-xs px-3 py-2 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                      title="Refresh models catalog"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 text-[#5A5A40] ${isLoadingProducts ? 'animate-spin' : ''}`} />
+                      <span className="hidden sm:inline">Refresh</span>
+                    </button>
+
+                    <button
                       onClick={() => setCurrentView('dashboard')}
                       className="inline-flex items-center gap-1.5 bg-[#F7F6F2] hover:bg-[#E5E2D9] text-[#2C2C2C] border border-[#E5E2D9] font-bold text-xs px-3.5 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
                       title="Open Creator & Store Admin Dashboard"
@@ -112,23 +127,27 @@ const MainContent: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {featuredProducts.map((product, idx) => (
-                    <motion.div
-                      key={product.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true, margin: '-20px' }}
-                      transition={{
-                        duration: 0.45,
-                        delay: (idx % 3) * 0.08,
-                        ease: [0.22, 1, 0.36, 1],
-                      }}
-                    >
-                      <ProductCard product={product} />
-                    </motion.div>
-                  ))}
-                </div>
+                {isLoadingProducts ? (
+                  <ProductCardSkeletonGrid id="home-featured-skeleton-grid" count={6} />
+                ) : (
+                  <div id="home-featured-products-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {featuredProducts.map((product, idx) => (
+                      <motion.div
+                        key={product.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true, margin: '-20px' }}
+                        transition={{
+                          duration: 0.45,
+                          delay: (idx % 3) * 0.08,
+                          ease: [0.22, 1, 0.36, 1],
+                        }}
+                      >
+                        <ProductCard product={product} />
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.section>
 

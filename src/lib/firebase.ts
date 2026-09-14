@@ -1,15 +1,40 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  setLogLevel,
+  Firestore,
+  memoryLocalCache,
+} from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
+
+// Silence non-fatal offline backend messages from Firestore SDK
+try {
+  setLogLevel('silent');
+} catch {}
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with custom database ID from config if present
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore with forced long-polling and resilient memory cache
+let firestoreDb: Firestore;
+try {
+  firestoreDb = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+      localCache: memoryLocalCache(),
+    },
+    firebaseConfig.firestoreDatabaseId || undefined
+  );
+} catch {
+  firestoreDb = firebaseConfig.firestoreDatabaseId
+    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+    : getFirestore(app);
+}
+
+export const db = firestoreDb;
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
@@ -27,7 +52,6 @@ export const ensureAuth = (): Promise<User> => {
           unsubscribe();
           resolve(userCredential.user);
         } catch (error) {
-          console.warn('Anonymous sign-in warning:', error);
           unsubscribe();
           reject(error);
         }

@@ -5,6 +5,7 @@ import { ThreeDViewer } from './ThreeDViewer';
 import { REVIEWS_DATABASE } from '../data/products';
 import { PRODUCTS } from '../data/products';
 import { ProductCard } from './ProductCard';
+import { ProductCardSkeletonGrid } from './ProductCardSkeleton';
 import {
   Star,
   Heart,
@@ -43,6 +44,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product }) => {
     giftNote,
     setGiftNote,
     setCurrentView,
+    isLoadingProducts,
   } = useStore();
 
   // Selected Options State
@@ -216,6 +218,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product }) => {
                   colorHex={selectedColor.hex}
                   materialFinish={selectedMaterial.name}
                   height="h-[520px]"
+                  modelTitle={product.name}
                   customDimensions={{
                     x: isCustomDimensions ? customWidthMm : selectedSize.dimensions.widthMm,
                     y: isCustomDimensions ? customDepthMm : selectedSize.dimensions.depthMm,
@@ -771,11 +774,19 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ product }) => {
         {/* RELATED PRODUCTS CAROUSEL */}
         <section className="mt-16 pt-12 border-t border-[#E5E2D9] space-y-6">
           <h2 className="font-serif text-2xl font-bold text-[#2C2C2C]">You May Also Like</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {relatedProducts.map((rel) => (
-              <ProductCard key={rel.id} product={rel} />
-            ))}
-          </div>
+          {isLoadingProducts ? (
+            <ProductCardSkeletonGrid
+              id="related-products-skeleton-grid"
+              count={3}
+              className="grid grid-cols-1 sm:grid-cols-3 gap-6"
+            />
+          ) : (
+            <div id="related-products-grid" className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              {relatedProducts.map((rel) => (
+                <ProductCard key={rel.id} product={rel} />
+              ))}
+            </div>
+          )}
         </section>
       </div>
 

@@ -78,7 +78,7 @@ export const OrderConfirmation: React.FC = () => {
         </div>
 
         {/* Order Details & Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Shipping Address */}
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs space-y-2 text-xs">
             <h4 className="font-bold text-stone-900 flex items-center gap-1.5">
@@ -101,6 +101,38 @@ export const OrderConfirmation: React.FC = () => {
             </h4>
             <p className="font-serif text-xl font-bold text-amber-800">{lastOrder.estimatedDeliveryDate}</p>
             <p className="text-stone-500 text-[11px]">Tracking Code: <span className="font-mono font-bold text-stone-900">{lastOrder.trackingNumber}</span></p>
+            <p className="text-[10px] text-stone-400">Pan-India Courier Dispatch</p>
+          </div>
+
+          {/* Payment Details */}
+          <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs space-y-2 text-xs">
+            <h4 className="font-bold text-stone-900 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-700" />
+              <span>Payment Confirmation</span>
+            </h4>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-stone-500 text-[11px]">Amount Paid:</span>
+                <span className="font-bold text-stone-900 font-mono text-sm">{formatPrice(lastOrder.total)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-stone-500 text-[11px]">Gateway:</span>
+                <span className="font-bold text-stone-800">
+                  {lastOrder.paymentMethod === 'razorpay' ? 'Razorpay Secure' : lastOrder.paymentMethod.toUpperCase()}
+                </span>
+              </div>
+              {lastOrder.razorpayPaymentId && (
+                <div className="pt-1 border-t border-stone-100">
+                  <span className="text-[10px] text-stone-400 block font-mono">Razorpay Txn ID:</span>
+                  <span className="font-mono text-[10px] font-bold text-emerald-700 break-all">
+                    {lastOrder.razorpayPaymentId}
+                  </span>
+                </div>
+              )}
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 mt-1">
+                ✓ 256-bit Verified & Settled
+              </span>
+            </div>
           </div>
         </div>
 

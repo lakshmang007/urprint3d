@@ -19,8 +19,38 @@ const PRODUCTS_COLLECTION = 'products';
 const ORDERS_COLLECTION = 'orders';
 const REVIEWS_COLLECTION = 'reviews';
 const UPLOADS_COLLECTION = 'customUploads';
+const SETTINGS_COLLECTION = 'storeSettings';
 
 let isInitialized = false;
+
+// Helper to prevent hanging on network latency
+function withTimeout<T>(promise: Promise<T>, ms: number, fallbackVal: T): Promise<T> {
+  return new Promise((resolve) => {
+    let completed = false;
+    const timer = setTimeout(() => {
+      if (!completed) {
+        completed = true;
+        resolve(fallbackVal);
+      }
+    }, ms);
+
+    promise
+      .then((res) => {
+        if (!completed) {
+          completed = true;
+          clearTimeout(timer);
+          resolve(res);
+        }
+      })
+      .catch((err) => {
+        if (!completed) {
+          completed = true;
+          clearTimeout(timer);
+          resolve(fallbackVal);
+        }
+      });
+  });
+}
 
 /**
  * Initialize and seed Firestore with default products if empty
@@ -32,32 +62,33 @@ export async function initializeFirestoreCatalog(): Promise<Product[]> {
   isInitialized = true;
 
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const productsRef = collection(db, PRODUCTS_COLLECTION);
-    const snapshot = await getDocs(productsRef);
+    const snapshot = await withTimeout(getDocs(productsRef), 3500, null);
 
-    if (snapshot.empty) {
-      console.log('Seeding initial 3D models catalog into Firestore...');
-      // Seed current products
-      for (const prod of PRODUCTS) {
-        const docRef = doc(db, PRODUCTS_COLLECTION, prod.id);
-        await setDoc(docRef, {
-          ...prod,
-          createdAt: new Date().toISOString(),
-        }).catch((e) => console.warn('Product seed warning:', e));
-      }
-
-      // Also seed sample reviews
-      for (const [prodId, reviews] of Object.entries(REVIEWS_DATABASE)) {
-        for (const rev of reviews) {
-          const revRef = doc(db, REVIEWS_COLLECTION, rev.id);
-          await setDoc(revRef, {
-            ...rev,
+    if (!snapshot || snapshot.empty) {
+      if (snapshot && snapshot.empty) {
+        console.log('Seeding initial 3D models catalog into Firestore...');
+        // Seed current products asynchronously
+        for (const prod of PRODUCTS) {
+          const docRef = doc(db, PRODUCTS_COLLECTION, prod.id);
+          setDoc(docRef, {
+            ...prod,
             createdAt: new Date().toISOString(),
           }).catch(() => {});
         }
-      }
 
+        // Also seed sample reviews
+        for (const [prodId, reviews] of Object.entries(REVIEWS_DATABASE)) {
+          for (const rev of reviews) {
+            const revRef = doc(db, REVIEWS_COLLECTION, rev.id);
+            setDoc(revRef, {
+              ...rev,
+              createdAt: new Date().toISOString(),
+            }).catch(() => {});
+          }
+        }
+      }
       return PRODUCTS;
     } else {
       const loadedProducts: Product[] = [];
@@ -67,7 +98,7 @@ export async function initializeFirestoreCatalog(): Promise<Product[]> {
       return loadedProducts;
     }
   } catch (error) {
-    console.warn('Firestore catalog init fallback to local:', error);
+    console.warn('Firestore catalog fallback to local:', error);
     return PRODUCTS;
   }
 }
@@ -80,6 +111,7 @@ export function subscribeToProducts(onUpdate: (products: Product[]) => void) {
     const productsRef = collection(db, PRODUCTS_COLLECTION);
     return onSnapshot(
       productsRef,
+      { includeMetadataChanges: false },
       (snapshot) => {
         if (!snapshot.empty) {
           const prods: Product[] = [];
@@ -90,11 +122,10 @@ export function subscribeToProducts(onUpdate: (products: Product[]) => void) {
         }
       },
       (error) => {
-        console.warn('Firestore snapshot listener error:', error);
+        // Silent recovery when running in offline/polling mode
       }
     );
   } catch (err) {
-    console.warn('Failed to subscribe to products:', err);
     return () => {};
   }
 }
@@ -103,12 +134,16 @@ export function subscribeToProducts(onUpdate: (products: Product[]) => void) {
  * Create a new 3D Model in Firestore
  */
 export async function addProductToFirestore(product: Product): Promise<void> {
-  await ensureAuth().catch(() => {});
-  const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
-  await setDoc(docRef, {
-    ...product,
-    createdAt: new Date().toISOString(),
-  });
+  try {
+    ensureAuth().catch(() => {});
+    const docRef = doc(db, PRODUCTS_COLLECTION, product.id);
+    await setDoc(docRef, {
+      ...product,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn('Firestore add product notice:', e);
+  }
 }
 
 /**
@@ -118,39 +153,53 @@ export async function updateProductInFirestore(
   productId: string,
   updates: Partial<Product>
 ): Promise<void> {
-  await ensureAuth().catch(() => {});
-  const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-  await updateDoc(docRef, {
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  });
+  try {
+    ensureAuth().catch(() => {});
+    const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+    await updateDoc(docRef, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn('Firestore update product notice:', e);
+  }
 }
 
 /**
  * Delete a 3D Model from Firestore
  */
 export async function deleteProductFromFirestore(productId: string): Promise<void> {
-  await ensureAuth().catch(() => {});
-  const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-  await deleteDoc(docRef);
+  try {
+    ensureAuth().catch(() => {});
+    const docRef = doc(db, PRODUCTS_COLLECTION, productId);
+    await deleteDoc(docRef);
+  } catch (e) {
+    console.warn('Firestore delete product notice:', e);
+  }
 }
 
 /**
  * Reset Firestore catalog to defaults
  */
 export async function resetFirestoreCatalog(): Promise<void> {
-  await ensureAuth().catch(() => {});
-  const productsRef = collection(db, PRODUCTS_COLLECTION);
-  const snapshot = await getDocs(productsRef);
-  for (const docSnap of snapshot.docs) {
-    await deleteDoc(docSnap.ref);
-  }
-  for (const prod of PRODUCTS) {
-    const docRef = doc(db, PRODUCTS_COLLECTION, prod.id);
-    await setDoc(docRef, {
-      ...prod,
-      createdAt: new Date().toISOString(),
-    });
+  try {
+    ensureAuth().catch(() => {});
+    const productsRef = collection(db, PRODUCTS_COLLECTION);
+    const snapshot = await withTimeout(getDocs(productsRef), 3000, null);
+    if (snapshot) {
+      for (const docSnap of snapshot.docs) {
+        await deleteDoc(docSnap.ref).catch(() => {});
+      }
+    }
+    for (const prod of PRODUCTS) {
+      const docRef = doc(db, PRODUCTS_COLLECTION, prod.id);
+      await setDoc(docRef, {
+        ...prod,
+        createdAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.warn('Firestore reset catalog notice:', e);
   }
 }
 
@@ -159,14 +208,14 @@ export async function resetFirestoreCatalog(): Promise<void> {
  */
 export async function saveOrderToFirestore(order: Order): Promise<void> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, ORDERS_COLLECTION, order.id);
     await setDoc(docRef, {
       ...order,
       createdAt: order.createdAt || new Date().toISOString(),
     });
   } catch (error) {
-    console.warn('Failed to save order to Firestore:', error);
+    console.warn('Notice saving order to Firestore:', error);
   }
 }
 
@@ -175,9 +224,10 @@ export async function saveOrderToFirestore(order: Order): Promise<void> {
  */
 export async function fetchOrdersFromFirestore(): Promise<Order[]> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const ordersRef = collection(db, ORDERS_COLLECTION);
-    const snapshot = await getDocs(ordersRef);
+    const snapshot = await withTimeout(getDocs(ordersRef), 3000, null);
+    if (!snapshot) return [];
     const orders: Order[] = [];
     snapshot.forEach((docSnap) => {
       orders.push(docSnap.data() as Order);
@@ -186,7 +236,6 @@ export async function fetchOrdersFromFirestore(): Promise<Order[]> {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   } catch (error) {
-    console.warn('Failed to fetch orders from Firestore:', error);
     return [];
   }
 }
@@ -196,14 +245,14 @@ export async function fetchOrdersFromFirestore(): Promise<Order[]> {
  */
 export async function saveReviewToFirestore(review: ProductReview): Promise<void> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, REVIEWS_COLLECTION, review.id);
     await setDoc(docRef, {
       ...review,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.warn('Failed to save review to Firestore:', error);
+    console.warn('Notice saving review to Firestore:', error);
   }
 }
 
@@ -212,7 +261,7 @@ export async function saveReviewToFirestore(review: ProductReview): Promise<void
  */
 export async function saveCustomUploadToFirestore(quote: CustomPrintQuote): Promise<void> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, UPLOADS_COLLECTION, `stl-${Date.now()}`);
     await setDoc(docRef, {
       id: `stl-${Date.now()}`,
@@ -230,7 +279,7 @@ export async function saveCustomUploadToFirestore(quote: CustomPrintQuote): Prom
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.warn('Failed to save custom upload to Firestore:', error);
+    console.warn('Notice saving custom upload to Firestore:', error);
   }
 }
 
@@ -239,9 +288,10 @@ export async function saveCustomUploadToFirestore(quote: CustomPrintQuote): Prom
  */
 export async function fetchCustomUploadsFromFirestore(): Promise<any[]> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const colRef = collection(db, UPLOADS_COLLECTION);
-    const snap = await getDocs(colRef);
+    const snap = await withTimeout(getDocs(colRef), 3000, null);
+    if (!snap) return [];
     const uploads: any[] = [];
     snap.forEach((docSnap) => {
       uploads.push({ id: docSnap.id, ...docSnap.data() });
@@ -250,7 +300,6 @@ export async function fetchCustomUploadsFromFirestore(): Promise<any[]> {
       (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
   } catch (err) {
-    console.warn('Failed to fetch custom uploads:', err);
     return [];
   }
 }
@@ -260,32 +309,30 @@ export async function fetchCustomUploadsFromFirestore(): Promise<any[]> {
  */
 export async function updateOrderInFirestore(orderId: string, updates: Partial<Order>): Promise<void> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, ORDERS_COLLECTION, orderId);
     await updateDoc(docRef, {
       ...updates,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.warn('Failed to update order in Firestore:', err);
+    console.warn('Notice updating order in Firestore:', err);
   }
 }
-
-const SETTINGS_COLLECTION = 'storeSettings';
 
 /**
  * Save Store & UI Settings to Firestore
  */
 export async function saveStoreSettingsToFirestore(settings: any): Promise<void> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, SETTINGS_COLLECTION, 'main_config');
     await setDoc(docRef, {
       ...settings,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.warn('Failed to save store settings:', err);
+    console.warn('Notice saving store settings:', err);
   }
 }
 
@@ -294,16 +341,14 @@ export async function saveStoreSettingsToFirestore(settings: any): Promise<void>
  */
 export async function fetchStoreSettingsFromFirestore(): Promise<any | null> {
   try {
-    await ensureAuth().catch(() => {});
+    ensureAuth().catch(() => {});
     const docRef = doc(db, SETTINGS_COLLECTION, 'main_config');
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
+    const docSnap = await withTimeout(getDoc(docRef), 3000, null);
+    if (docSnap && docSnap.exists()) {
       return docSnap.data();
     }
     return null;
   } catch (err) {
-    console.warn('Failed to fetch store settings:', err);
     return null;
   }
 }
-

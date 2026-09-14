@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../context/StoreContext';
 import { PRODUCTS } from '../data/products';
 import { ProductCard } from './ProductCard';
+import { ProductCardSkeletonGrid } from './ProductCardSkeleton';
 import {
   User,
   ShoppingBag,
@@ -20,6 +21,8 @@ export const UserAccount: React.FC = () => {
   const {
     orders,
     wishlistIds,
+    products,
+    isLoadingProducts,
     openProductDetail,
     formatPrice,
     setCurrentView,
@@ -28,7 +31,7 @@ export const UserAccount: React.FC = () => {
   } = useStore();
   const [activeTab, setActiveTab] = useState<'orders' | 'wishlist' | 'addresses' | 'stls'>('orders');
 
-  const wishlistedProducts = PRODUCTS.filter((p) => wishlistIds.includes(p.id));
+  const wishlistedProducts = products.filter((p) => wishlistIds.includes(p.id));
 
   return (
     <div className="bg-stone-50 min-h-screen font-sans py-10">
@@ -103,6 +106,11 @@ export const UserAccount: React.FC = () => {
                     <div>
                       <span className="font-mono font-bold text-amber-700 text-sm">Order #{ord.id}</span>
                       <span className="text-stone-400 text-[11px] ml-2">• Placed {new Date(ord.createdAt).toLocaleDateString()}</span>
+                      {ord.paymentMethod === 'razorpay' && (
+                        <span className="ml-2 inline-block text-[10px] bg-[#0c2340] text-white px-2 py-0.5 rounded-md font-mono font-semibold">
+                          Razorpay {ord.razorpayPaymentId ? `• ${ord.razorpayPaymentId.slice(-6)}` : 'Verified'}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">

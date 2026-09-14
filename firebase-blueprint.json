@@ -38,6 +38,9 @@
         "currency": { "type": "string", "description": "Currency code (e.g. INR)" },
         "status": { "type": "string", "description": "Order status (e.g. In Production, Shipped)" },
         "paymentMethod": { "type": "string", "description": "Payment method used" },
+        "razorpayPaymentId": { "type": "string", "description": "Razorpay verified payment transaction ID" },
+        "razorpayOrderId": { "type": "string", "description": "Razorpay gateway order ID" },
+        "paymentStatus": { "type": "string", "description": "Payment capture status (e.g. paid, pending)" },
         "createdAt": { "type": "string", "description": "Order placement timestamp" }
       },
       "required": ["id", "customer", "items", "total"]

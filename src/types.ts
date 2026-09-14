@@ -153,7 +153,7 @@ export interface ShippingAddress {
   phone: string;
 }
 
-export type PaymentMethod = 'card' | 'apple_pay' | 'upi' | 'cod';
+export type PaymentMethod = 'razorpay' | 'upi' | 'card' | 'apple_pay' | 'cod';
 
 export interface Order {
   id: string;
@@ -168,6 +168,10 @@ export interface Order {
   currency: CurrencyCode;
   shippingAddress: ShippingAddress;
   paymentMethod: PaymentMethod;
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
+  razorpaySignature?: string;
+  paymentStatus?: 'paid' | 'captured' | 'pending' | 'cod';
   giftNote?: string;
   status: 'Sliced' | '3D Printing' | 'Post-Processing' | 'Shipped' | 'Delivered';
   trackingNumber: string;

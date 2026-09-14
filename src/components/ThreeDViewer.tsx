@@ -7,23 +7,35 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Minimize2,
   RefreshCcw,
   Sparkles,
+  Compass,
+  Sun,
+  Moon,
+  Eye,
+  Sliders,
+  X,
 } from 'lucide-react';
 
 interface ThreeDViewerProps {
   geometryType?:
     | 'spiral_vase'
     | 'anime_figure'
+    | 'anime_hero'
     | 'chibi'
     | 'wall_art'
+    | 'wave_wall'
     | 'keychain'
     | 'dragon'
+    | 'flexi_dragon'
     | 'planter'
     | 'lamp'
     | 'sculpture'
     | 'gear_clock'
     | 'custom';
+  uploadedGeometry?: THREE.BufferGeometry | null;
+  scalePercentage?: number;
   colorHex?: string;
   materialFinish?: string;
   wireframe?: boolean;
@@ -31,30 +43,88 @@ interface ThreeDViewerProps {
   height?: string;
   customVolumeCm3?: number;
   customDimensions?: { x: number; y: number; z: number };
+  modelTitle?: string;
 }
 
 export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
   geometryType = 'spiral_vase',
+  uploadedGeometry = null,
+  scalePercentage = 100,
   colorHex = '#5A5A40',
   wireframe: initialWireframe = false,
   className = '',
   height = 'h-80',
   materialFinish = 'Matte Precision Polymer',
   customDimensions,
+  modelTitle = '3D CAD Model',
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
+
   const [wireframe, setWireframe] = useState(initialWireframe);
   const [isRotating, setIsRotating] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [renderMode, setRenderMode] = useState<'solid' | 'wireframe' | 'slicer'>('solid');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [environmentTheme, setEnvironmentTheme] = useState<'light' | 'dark' | 'blueprint'>('light');
 
-  // References for dynamic updates
+  // References for Three.js instances
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const rootGroupRef = useRef<THREE.Group | null>(null);
-  const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  const meshGroupRef = useRef<THREE.Group | null>(null);
+  const activeMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const gridHelperRef = useRef<THREE.PolarGridHelper | null>(null);
 
+  // Mouse / Touch interaction state
+  const isDraggingRef = useRef(false);
+  const prevMousePosRef = useRef({ x: 0, y: 0 });
+
+  // Toggle Full Screen View with native API + CSS fallback
+  const toggleFullscreen = () => {
+    const nextState = !isFullscreen;
+    setIsFullscreen(nextState);
+
+    if (nextState) {
+      if (containerRef.current?.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(() => {
+          // Ignored if in restricted iframe sandbox; CSS fallback active
+        });
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  };
+
+  // Keyboard shortcut listener (Escape to exit fullscreen)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+    };
+
+    const handleFsChange = () => {
+      if (!document.fullscreenElement && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('fullscreenchange', handleFsChange);
+    };
+  }, [isFullscreen]);
+
+  // Main Three.js setup
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -63,15 +133,21 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
     let animationFrameId: number;
 
     try {
-      const width = container.clientWidth > 0 ? container.clientWidth : 420;
-      const heightPx = container.clientHeight > 0 ? container.clientHeight : 340;
+      const width = container.clientWidth > 0 ? container.clientWidth : 480;
+      const heightPx = container.clientHeight > 0 ? container.clientHeight : 380;
 
-      // 1. Scene setup with studio aesthetic
+      // 1. Scene Setup
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xfbfaf7);
+      const bgColor =
+        environmentTheme === 'dark'
+          ? 0x18181b
+          : environmentTheme === 'blueprint'
+          ? 0x0f172a
+          : 0xfcfbf9;
+      scene.background = new THREE.Color(bgColor);
       sceneRef.current = scene;
 
-      // 2. Camera setup
+      // 2. Camera Setup
       const camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 1000);
       camera.position.set(0, 14, 28);
       camera.lookAt(0, 0, 0);
@@ -88,7 +164,6 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      // Clear previous DOM children safely
       while (container.firstChild) {
         container.removeChild(container.firstChild);
       }
@@ -96,12 +171,15 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
       rendererRef.current = renderer;
 
       // 4. Lighting Rig
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+      const ambientLight = new THREE.AmbientLight(
+        environmentTheme === 'dark' ? 0xffffff : 0xffffff,
+        environmentTheme === 'dark' ? 0.7 : 0.9
+      );
       scene.add(ambientLight);
 
       // Key light with shadow
       const dirLight1 = new THREE.DirectionalLight(0xfffaed, 1.4);
-      dirLight1.position.set(15, 25, 18);
+      dirLight1.position.set(16, 26, 18);
       dirLight1.castShadow = true;
       dirLight1.shadow.mapSize.width = 1024;
       dirLight1.shadow.mapSize.height = 1024;
@@ -109,22 +187,30 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
       dirLight1.shadow.camera.far = 80;
       scene.add(dirLight1);
 
-      // Rim light for clean silhouette highlights
-      const dirLight2 = new THREE.DirectionalLight(0xd1cfb9, 0.9);
-      dirLight2.position.set(-18, 12, -15);
+      // Rim light
+      const dirLight2 = new THREE.DirectionalLight(
+        environmentTheme === 'blueprint' ? 0x38bdf8 : 0xd1cfb9,
+        0.85
+      );
+      dirLight2.position.set(-18, 14, -15);
       scene.add(dirLight2);
 
-      // Soft underside bounce light
-      const bounceLight = new THREE.DirectionalLight(0xffffff, 0.4);
+      // Underside bounce
+      const bounceLight = new THREE.DirectionalLight(0xffffff, 0.45);
       bounceLight.position.set(0, -10, 0);
       scene.add(bounceLight);
 
       // 5. Studio circular ground base & grid
       const groundGeo = new THREE.CylinderGeometry(14, 14, 0.4, 48);
       const groundMat = new THREE.MeshStandardMaterial({
-        color: 0xeeece4,
+        color:
+          environmentTheme === 'dark'
+            ? 0x27272a
+            : environmentTheme === 'blueprint'
+            ? 0x1e293b
+            : 0xeeece4,
         roughness: 0.9,
-        metalness: 0.1,
+        metalness: 0.05,
       });
       const ground = new THREE.Mesh(groundGeo, groundMat);
       ground.position.y = -6.2;
@@ -132,551 +218,378 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
       scene.add(ground);
 
       // Radial slicer grid helper
-      const gridHelper = new THREE.PolarGridHelper(13, 8, 8, 32, 0xb8b5a8, 0xd8d5c8);
+      const gridColor =
+        environmentTheme === 'blueprint' ? 0x0284c7 : 0xb8b5a8;
+      const gridHelper = new THREE.PolarGridHelper(13, 8, 8, 32, gridColor, 0x71717a);
       gridHelper.position.y = -5.95;
       scene.add(gridHelper);
+      gridHelperRef.current = gridHelper;
 
-      // 6. Build Compound 3D Procedural Geometries
-      const modelGroup = new THREE.Group();
-      scene.add(modelGroup);
-      rootGroupRef.current = modelGroup;
+      // 6. Master Model Group
+      const rootGroup = new THREE.Group();
+      scene.add(rootGroup);
+      rootGroupRef.current = rootGroup;
 
-      const activeMaterials: THREE.MeshStandardMaterial[] = [];
+      const meshGroup = new THREE.Group();
+      rootGroup.add(meshGroup);
+      meshGroupRef.current = meshGroup;
 
-      const createStdMaterial = (hex: string, rough = 0.35, metal = 0.15) => {
-        const mat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(hex),
-          roughness: rough,
-          metalness: metal,
-          wireframe: wireframe,
-        });
-        activeMaterials.push(mat);
-        return mat;
-      };
+      // 7. Material Setup
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(colorHex),
+        roughness: materialFinish.includes('Resin')
+          ? 0.15
+          : materialFinish.includes('Carbon')
+          ? 0.6
+          : 0.35,
+        metalness: materialFinish.includes('Silk') ? 0.7 : 0.15,
+        wireframe: renderMode === 'wireframe',
+      });
+      activeMaterialRef.current = mat;
 
-      const primaryMat = createStdMaterial(colorHex, 0.3, 0.2);
-      const accentMat = createStdMaterial('#2C2C2C', 0.4, 0.1);
-      const metallicMat = createStdMaterial('#C8B568', 0.25, 0.7);
+      // 8. Build Geometry
+      buildActiveModel(meshGroup, uploadedGeometry, geometryType, mat, scalePercentage);
 
-      materialsRef.current = activeMaterials;
-
-      switch (geometryType) {
-        case 'anime_figure': {
-          // --- ANIME ACTION FIGURE COMPOUND MODEL ---
-          // Base Pedestal
-          const base = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 6, 1.2, 32), accentMat);
-          base.position.y = -5.4;
-          base.castShadow = true;
-          base.receiveShadow = true;
-          modelGroup.add(base);
-
-          // Boots / Lower Legs
-          const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 4.5, 12), primaryMat);
-          leftLeg.position.set(-1.4, -2.6, 0.2);
-          leftLeg.rotation.z = 0.12;
-          leftLeg.castShadow = true;
-          modelGroup.add(leftLeg);
-
-          const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 4.5, 12), primaryMat);
-          rightLeg.position.set(1.4, -2.6, -0.2);
-          rightLeg.rotation.z = -0.12;
-          rightLeg.castShadow = true;
-          modelGroup.add(rightLeg);
-
-          // Armored Torso / Robes
-          const torso = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4.2, 16), primaryMat);
-          torso.position.y = 0.2;
-          torso.rotation.x = Math.PI;
-          torso.castShadow = true;
-          modelGroup.add(torso);
-
-          // Chest Armor Plate
-          const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.8, 1.6), accentMat);
-          chestPlate.position.set(0, 0.8, 0.3);
-          chestPlate.castShadow = true;
-          modelGroup.add(chestPlate);
-
-          // Shoulder Armor Pads
-          const leftPad = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 12), accentMat);
-          leftPad.position.set(-2.2, 1.4, 0);
-          leftPad.scale.set(1.2, 0.8, 1);
-          leftPad.castShadow = true;
-          modelGroup.add(leftPad);
-
-          const rightPad = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 12), accentMat);
-          rightPad.position.set(2.2, 1.4, 0);
-          rightPad.scale.set(1.2, 0.8, 1);
-          rightPad.castShadow = true;
-          modelGroup.add(rightPad);
-
-          // Head & Anime Face
-          const head = new THREE.Mesh(new THREE.SphereGeometry(1.4, 24, 20), primaryMat);
-          head.position.y = 2.8;
-          head.scale.set(0.9, 1.1, 0.95);
-          head.castShadow = true;
-          modelGroup.add(head);
-
-          // Spiked Hair Crest
-          const hairGroup = new THREE.Group();
-          for (let i = 0; i < 7; i++) {
-            const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.2, 6), primaryMat);
-            const angle = (i - 3) * 0.35;
-            spike.position.set(Math.sin(angle) * 1.2, 3.8 + Math.cos(angle) * 0.6, -Math.abs(angle) * 0.3);
-            spike.rotation.z = -angle * 0.8;
-            spike.rotation.x = -0.3;
-            hairGroup.add(spike);
-          }
-          modelGroup.add(hairGroup);
-
-          // Katana Sword
-          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.2, 9.0, 0.5), metallicMat);
-          blade.position.set(2.6, 1.2, 1.2);
-          blade.rotation.z = -0.4;
-          blade.rotation.x = 0.2;
-          blade.castShadow = true;
-          modelGroup.add(blade);
-
-          // Ethereal Aura Ring / Halo
-          const halo = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.18, 12, 36), metallicMat);
-          halo.position.set(0, 1.5, -1.0);
-          halo.rotation.x = 0.4;
-          modelGroup.add(halo);
-          break;
-        }
-
-        case 'chibi': {
-          // --- CHIBI CHARACTER STATUE ---
-          // Rounded Base
-          const base = new THREE.Mesh(new THREE.CylinderGeometry(4.8, 5.2, 1.0, 32), accentMat);
-          base.position.y = -5.4;
-          base.castShadow = true;
-          modelGroup.add(base);
-
-          // Small Plump Body
-          const body = new THREE.Mesh(new THREE.SphereGeometry(2.4, 24, 20), primaryMat);
-          body.position.y = -2.2;
-          body.scale.set(1.0, 1.2, 0.9);
-          body.castShadow = true;
-          modelGroup.add(body);
-
-          // Big Cute Head (Chibi 1:1 proportion)
-          const head = new THREE.Mesh(new THREE.SphereGeometry(3.6, 32, 28), primaryMat);
-          head.position.y = 1.6;
-          head.castShadow = true;
-          modelGroup.add(head);
-
-          // Cute Ears / Hair Buns
-          const leftEar = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), accentMat);
-          leftEar.position.set(-2.8, 4.4, 0);
-          modelGroup.add(leftEar);
-
-          const rightEar = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), accentMat);
-          rightEar.position.set(2.8, 4.4, 0);
-          modelGroup.add(rightEar);
-
-          // Eyes
-          const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 12), accentMat);
-          leftEye.position.set(-1.1, 1.8, 3.3);
-          modelGroup.add(leftEye);
-
-          const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 12), accentMat);
-          rightEye.position.set(1.1, 1.8, 3.3);
-          modelGroup.add(rightEye);
-          break;
-        }
-
-        case 'wall_art': {
-          // --- 3D SACRED GEOMETRIC MANDALA WALL ART ---
-          // Outer Beveled Frame
-          const frame = new THREE.Mesh(new THREE.BoxGeometry(14, 14, 1.2), accentMat);
-          frame.position.set(0, 0, 0);
-          frame.castShadow = true;
-          frame.receiveShadow = true;
-          modelGroup.add(frame);
-
-          // Inner Relief Canvas
-          const innerCanvas = new THREE.Mesh(new THREE.BoxGeometry(12.4, 12.4, 1.4), primaryMat);
-          innerCanvas.position.set(0, 0, 0.2);
-          modelGroup.add(innerCanvas);
-
-          // Multi-layer Radial Mandala Rings
-          for (let layer = 1; layer <= 4; layer++) {
-            const count = layer * 6;
-            const radius = layer * 1.3;
-            for (let i = 0; i < count; i++) {
-              const angle = (i / count) * Math.PI * 2;
-              const petal = new THREE.Mesh(
-                new THREE.ConeGeometry(0.45 * (5 - layer) * 0.3, 1.8, 4),
-                metallicMat
-              );
-              petal.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 1.1 + layer * 0.15);
-              petal.rotation.z = angle - Math.PI / 2;
-              petal.rotation.x = 0.2;
-              petal.castShadow = true;
-              modelGroup.add(petal);
-            }
-          }
-
-          // Center Sun/Lotus Gem
-          const centerGem = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2, 1), metallicMat);
-          centerGem.position.set(0, 0, 1.8);
-          centerGem.castShadow = true;
-          modelGroup.add(centerGem);
-          break;
-        }
-
-        case 'dragon': {
-          // --- ARTICULATED DRAGON / WYVERN ---
-          const dragonKnot = new THREE.Mesh(
-            new THREE.TorusKnotGeometry(5.2, 1.6, 120, 20, 2, 3),
-            primaryMat
-          );
-          dragonKnot.position.y = 0.5;
-          dragonKnot.castShadow = true;
-          dragonKnot.receiveShadow = true;
-          modelGroup.add(dragonKnot);
-
-          // Dragon Head & Horns
-          const head = new THREE.Mesh(new THREE.ConeGeometry(1.8, 4.0, 8), primaryMat);
-          head.position.set(0, 4.8, 3.2);
-          head.rotation.x = -Math.PI / 3;
-          head.castShadow = true;
-          modelGroup.add(head);
-
-          const leftHorn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.5, 6), metallicMat);
-          leftHorn.position.set(-1.2, 6.2, 2.2);
-          leftHorn.rotation.z = 0.5;
-          leftHorn.rotation.x = -0.4;
-          modelGroup.add(leftHorn);
-
-          const rightHorn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.5, 6), metallicMat);
-          rightHorn.position.set(1.2, 6.2, 2.2);
-          rightHorn.rotation.z = -0.5;
-          rightHorn.rotation.x = -0.4;
-          modelGroup.add(rightHorn);
-          break;
-        }
-
-        case 'keychain': {
-          // --- ARTICULATED KEYCHAIN CHARM ---
-          // Top Metal Key Ring Loop
-          const keyRing = new THREE.Mesh(new THREE.TorusGeometry(2.0, 0.35, 16, 32), metallicMat);
-          keyRing.position.set(0, 4.8, 0);
-          keyRing.castShadow = true;
-          modelGroup.add(keyRing);
-
-          // Link Connector
-          const link = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.8, 12), metallicMat);
-          link.position.set(0, 2.8, 0);
-          modelGroup.add(link);
-
-          // Beveled Dragon Medallion Tag
-          const tag = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 3.8, 0.8, 32), primaryMat);
-          tag.position.set(0, -0.6, 0);
-          tag.rotation.x = Math.PI / 2;
-          tag.castShadow = true;
-          tag.receiveShadow = true;
-          modelGroup.add(tag);
-
-          // Embossed Kanji/Dragon Crest
-          const crest = new THREE.Mesh(new THREE.TorusKnotGeometry(1.6, 0.35, 48, 8, 2, 3), metallicMat);
-          crest.position.set(0, -0.6, 0.5);
-          crest.castShadow = true;
-          modelGroup.add(crest);
-          break;
-        }
-
-        case 'spiral_vase': {
-          // --- TWISTED FIBONACCI SPIRAL VASE ---
-          const vaseGeo = new THREE.CylinderGeometry(4.2, 6.0, 13.5, 36, 40);
-          const pos = vaseGeo.attributes.position;
-          for (let i = 0; i < pos.count; i++) {
-            const y = pos.getY(i);
-            const x = pos.getX(i);
-            const z = pos.getZ(i);
-            // Non-linear organic twist
-            const angle = (y + 7) * 0.18;
-            const radiusMod = 1.0 + Math.sin(y * 0.6) * 0.15;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            pos.setX(i, (x * cos - z * sin) * radiusMod);
-            pos.setZ(i, (x * sin + z * cos) * radiusMod);
-          }
-          vaseGeo.computeVertexNormals();
-
-          const vase = new THREE.Mesh(vaseGeo, primaryMat);
-          vase.position.y = 0.8;
-          vase.castShadow = true;
-          vase.receiveShadow = true;
-          modelGroup.add(vase);
-          break;
-        }
-
-        case 'planter': {
-          // --- GEOMETRIC HEXAGONAL FLUTED PLANTER ---
-          const potGeo = new THREE.CylinderGeometry(5.8, 4.4, 9.5, 8, 6);
-          const pot = new THREE.Mesh(potGeo, primaryMat);
-          pot.position.y = -0.5;
-          pot.castShadow = true;
-          pot.receiveShadow = true;
-          modelGroup.add(pot);
-
-          // Inner Soil Rim
-          const soil = new THREE.Mesh(new THREE.CylinderGeometry(4.8, 4.0, 1.0, 16), accentMat);
-          soil.position.y = 3.6;
-          modelGroup.add(soil);
-
-          // Saucer Tray
-          const saucer = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.0, 1.2, 16), accentMat);
-          saucer.position.y = -5.0;
-          saucer.castShadow = true;
-          modelGroup.add(saucer);
-          break;
-        }
-
-        case 'lamp': {
-          // --- LATTICE VORONOI SHADE WITH INTERNAL GLOW ---
-          const shade = new THREE.Mesh(
-            new THREE.CylinderGeometry(4.5, 5.5, 12, 24, 16, true),
-            primaryMat
-          );
-          shade.position.y = 0.5;
-          shade.castShadow = true;
-          modelGroup.add(shade);
-
-          // Internal warm glowing filament core
-          const bulbGeo = new THREE.SphereGeometry(1.6, 24, 24);
-          const bulbMat = new THREE.MeshStandardMaterial({
-            color: 0xffe899,
-            emissive: 0xffaa00,
-            emissiveIntensity: 0.9,
-            roughness: 0.1,
-          });
-          const bulb = new THREE.Mesh(bulbGeo, bulbMat);
-          bulb.position.y = 0.5;
-          modelGroup.add(bulb);
-
-          // Point light emitting from inside lamp
-          const lampLight = new THREE.PointLight(0xffb74d, 2.5, 20);
-          lampLight.position.y = 0.5;
-          modelGroup.add(lampLight);
-          break;
-        }
-
-        case 'gear_clock': {
-          // --- INTERLOCKING PLANETARY GEAR MECHANISM ---
-          const gear1 = new THREE.Mesh(new THREE.TorusGeometry(5.5, 1.5, 16, 32), primaryMat);
-          gear1.rotation.x = Math.PI / 2;
-          gear1.castShadow = true;
-          modelGroup.add(gear1);
-
-          // Central Sun Gear
-          const sunGear = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 2.0, 12), metallicMat);
-          sunGear.castShadow = true;
-          modelGroup.add(sunGear);
-          break;
-        }
-
-        case 'sculpture':
-        default: {
-          const polyGeo = new THREE.IcosahedronGeometry(5.8, 1);
-          const poly = new THREE.Mesh(polyGeo, primaryMat);
-          poly.position.y = 0.5;
-          poly.castShadow = true;
-          poly.receiveShadow = true;
-          modelGroup.add(poly);
-          break;
-        }
-      }
-
-      // 7. Interactive Pointer / Touch Drag
-      let isDragging = false;
-      let previousPosition = { x: 0, y: 0 };
-
-      const onPointerDown = (e: PointerEvent) => {
-        isDragging = true;
-        previousPosition = { x: e.clientX, y: e.clientY };
-      };
-
-      const onPointerMove = (e: PointerEvent) => {
-        if (!isDragging || !rootGroupRef.current) return;
-        const deltaX = e.clientX - previousPosition.x;
-        const deltaY = e.clientY - previousPosition.y;
-
-        rootGroupRef.current.rotation.y += deltaX * 0.009;
-        rootGroupRef.current.rotation.x = Math.max(
-          -0.6,
-          Math.min(0.6, rootGroupRef.current.rotation.x + deltaY * 0.009)
-        );
-
-        previousPosition = { x: e.clientX, y: e.clientY };
-      };
-
-      const onPointerUp = () => {
-        isDragging = false;
-      };
-
-      const domElement = renderer.domElement;
-      domElement.style.touchAction = 'none';
-      domElement.addEventListener('pointerdown', onPointerDown);
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-
-      // 8. Render Animation Loop
+      // 9. Animation Loop
       const animate = () => {
         if (isDestroyed) return;
         animationFrameId = requestAnimationFrame(animate);
 
-        if (isRotating && rootGroupRef.current && !isDragging) {
+        if (rootGroupRef.current && isRotating && !isDraggingRef.current) {
           rootGroupRef.current.rotation.y += 0.008;
         }
 
         renderer.render(scene, camera);
       };
-
       animate();
 
-      // 9. Resize Observer with Debounce and Threshold
-      let resizeTimer: number | undefined;
-      const handleResize = () => {
-        if (isDestroyed || !container || !renderer || !camera) return;
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        if (w === 0 || h === 0) return;
-
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h, false);
+      // 10. Mouse/Touch Orbit Handlers
+      const handleMouseDown = (e: MouseEvent) => {
+        isDraggingRef.current = true;
+        prevMousePosRef.current = { x: e.clientX, y: e.clientY };
       };
 
-      const resizeObserver = new ResizeObserver(() => {
-        if (resizeTimer) window.clearTimeout(resizeTimer);
-        resizeTimer = window.setTimeout(handleResize, 50);
+      const handleMouseMove = (e: MouseEvent) => {
+        if (!isDraggingRef.current || !rootGroupRef.current) return;
+        const deltaX = e.clientX - prevMousePosRef.current.x;
+        const deltaY = e.clientY - prevMousePosRef.current.y;
+
+        rootGroupRef.current.rotation.y += deltaX * 0.01;
+        rootGroupRef.current.rotation.x = Math.max(
+          -0.5,
+          Math.min(0.7, rootGroupRef.current.rotation.x + deltaY * 0.008)
+        );
+
+        prevMousePosRef.current = { x: e.clientX, y: e.clientY };
+      };
+
+      const handleMouseUp = () => {
+        isDraggingRef.current = false;
+      };
+
+      // Touch handlers for mobile / tablet gestures
+      const handleTouchStart = (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          isDraggingRef.current = true;
+          prevMousePosRef.current = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY,
+          };
+        }
+      };
+
+      const handleTouchMove = (e: TouchEvent) => {
+        if (!isDraggingRef.current || !rootGroupRef.current || e.touches.length !== 1) return;
+        const deltaX = e.touches[0].clientX - prevMousePosRef.current.x;
+        const deltaY = e.touches[0].clientY - prevMousePosRef.current.y;
+
+        rootGroupRef.current.rotation.y += deltaX * 0.012;
+        rootGroupRef.current.rotation.x = Math.max(
+          -0.5,
+          Math.min(0.7, rootGroupRef.current.rotation.x + deltaY * 0.009)
+        );
+
+        prevMousePosRef.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+        };
+      };
+
+      const handleTouchEnd = () => {
+        isDraggingRef.current = false;
+      };
+
+      const handleWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        if (!cameraRef.current) return;
+        const newZ = cameraRef.current.position.z + e.deltaY * 0.03;
+        cameraRef.current.position.z = Math.max(10, Math.min(60, newZ));
+      };
+
+      const domElement = renderer.domElement;
+      domElement.addEventListener('mousedown', handleMouseDown);
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      domElement.addEventListener('touchstart', handleTouchStart, { passive: true });
+      window.addEventListener('touchmove', handleTouchMove, { passive: true });
+      window.addEventListener('touchend', handleTouchEnd);
+      domElement.addEventListener('wheel', handleWheel, { passive: false });
+
+      // Resize observer
+      const resizeObserver = new ResizeObserver((entries) => {
+        if (isDestroyed || !renderer || !camera) return;
+        for (const entry of entries) {
+          const newW = entry.contentRect.width;
+          const newH = entry.contentRect.height || 380;
+          if (newW > 0 && newH > 0) {
+            camera.aspect = newW / newH;
+            camera.updateProjectionMatrix();
+            renderer.setSize(newW, newH, false);
+          }
+        }
       });
       resizeObserver.observe(container);
 
       return () => {
         isDestroyed = true;
-        if (resizeTimer) window.clearTimeout(resizeTimer);
         cancelAnimationFrame(animationFrameId);
-
-        domElement.removeEventListener('pointerdown', onPointerDown);
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
         resizeObserver.disconnect();
-
-        try {
-          renderer.dispose();
-          scene.clear();
-        } catch (e) {
-          // ignore clean teardown
-        }
+        domElement.removeEventListener('mousedown', handleMouseDown);
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+        domElement.removeEventListener('touchstart', handleTouchStart);
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
+        domElement.removeEventListener('wheel', handleWheel);
+        renderer.dispose();
       };
     } catch (err) {
-      console.warn('Three.js 3D Viewer initialization fallback:', err);
-      setHasError(true);
+      console.warn('3D Viewer Initialization notice:', err);
     }
-  }, [geometryType]);
+  }, [geometryType, uploadedGeometry, environmentTheme]);
 
-  // Update color dynamically across active materials
+  // Update Material Color / Finish dynamically
   useEffect(() => {
-    if (materialsRef.current.length > 0 && colorHex) {
-      try {
-        const threeColor = new THREE.Color(colorHex);
-        materialsRef.current.forEach((mat, idx) => {
-          if (idx === 0) {
-            mat.color.set(threeColor);
-          }
-        });
-      } catch (e) {
-        // ignore
-      }
+    if (activeMaterialRef.current) {
+      activeMaterialRef.current.color.set(colorHex);
+      activeMaterialRef.current.wireframe = renderMode === 'wireframe';
+      activeMaterialRef.current.roughness = materialFinish.includes('Resin')
+        ? 0.15
+        : 0.35;
+      activeMaterialRef.current.metalness = materialFinish.includes('Silk')
+        ? 0.7
+        : 0.15;
     }
-  }, [colorHex]);
+  }, [colorHex, renderMode, materialFinish]);
 
-  // Update wireframe / layer slicing mode dynamically
+  // Update Scale dynamically
   useEffect(() => {
-    if (materialsRef.current.length > 0) {
-      materialsRef.current.forEach((mat) => {
-        mat.wireframe = wireframe;
-      });
+    if (meshGroupRef.current) {
+      const s = scalePercentage / 100;
+      meshGroupRef.current.scale.set(s, s, s);
     }
-  }, [wireframe]);
+  }, [scalePercentage]);
 
-  // Camera Zoom Controls
-  const handleZoom = (direction: 'in' | 'out') => {
-    if (!cameraRef.current) return;
-    const delta = direction === 'in' ? -3 : 3;
-    const newZ = cameraRef.current.position.z + delta;
-    if (newZ >= 12 && newZ <= 45) {
-      cameraRef.current.position.z = newZ;
+  // Preset Camera Angles
+  const setCameraView = (view: 'iso' | 'front' | 'top' | 'side') => {
+    if (!cameraRef.current || !rootGroupRef.current) return;
+    rootGroupRef.current.rotation.set(0, 0, 0);
+
+    switch (view) {
+      case 'front':
+        cameraRef.current.position.set(0, 2, 28);
+        break;
+      case 'top':
+        cameraRef.current.position.set(0, 32, 0.1);
+        break;
+      case 'side':
+        cameraRef.current.position.set(28, 2, 0);
+        break;
+      case 'iso':
+      default:
+        cameraRef.current.position.set(0, 14, 28);
+        break;
     }
+    cameraRef.current.lookAt(0, 0, 0);
   };
 
   const handleResetCamera = () => {
-    if (!cameraRef.current || !rootGroupRef.current) return;
-    cameraRef.current.position.set(0, 14, 28);
-    cameraRef.current.lookAt(0, 0, 0);
-    rootGroupRef.current.rotation.set(0, 0, 0);
+    setCameraView('iso');
   };
 
-  if (hasError) {
-    return (
-      <div className={`relative bg-[#F7F6F2] rounded-2xl border border-[#E5E2D9] p-8 flex flex-col items-center justify-center text-center space-y-3 ${className} ${height}`}>
-        <Box className="w-12 h-12 text-[#5A5A40]" />
-        <h4 className="font-serif font-bold text-[#2C2C2C] text-sm">3D Slicer Mesh Ready</h4>
-        <p className="text-xs text-[#8E9299] max-w-xs">
-          High-precision 0.08mm layer geometry loaded with {materialFinish} specification.
-        </p>
-      </div>
-    );
-  }
+  const handleZoom = (delta: number) => {
+    if (cameraRef.current) {
+      const newZ = cameraRef.current.position.z + delta;
+      cameraRef.current.position.z = Math.max(10, Math.min(60, newZ));
+    }
+  };
 
   return (
-    <div className={`relative bg-[#F7F6F2] rounded-2xl border border-[#E5E2D9] overflow-hidden select-none group ${className}`}>
-      {/* 3D Canvas Container */}
+    <div
+      ref={containerRef}
+      className={`relative select-none transition-all ${
+        isFullscreen
+          ? 'fixed inset-0 z-[9999] w-screen h-screen m-0 rounded-none bg-[#141517] flex flex-col'
+          : `bg-[#FAF9F6] rounded-2xl overflow-hidden border border-[#E5E2D9] ${className} ${height}`
+      }`}
+    >
+      {/* FULLSCREEN HEADER BAR */}
+      {isFullscreen && (
+        <div className="bg-[#1F2023]/95 backdrop-blur-md border-b border-[#2E3035] px-6 py-3.5 flex items-center justify-between z-30 text-white shadow-md shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#5A5A40] flex items-center justify-center text-[#FAF9F6] shadow-xs">
+              <Box className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-serif text-base font-bold text-white tracking-wide">
+                  {modelTitle}
+                </h3>
+                <span className="bg-[#5A5A40]/30 text-[#D1CFB9] border border-[#5A5A40]/50 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold">
+                  3D Inspection Studio
+                </span>
+              </div>
+              {customDimensions && (
+                <p className="text-xs text-stone-400 font-mono">
+                  Bounding Box: {customDimensions.x} × {customDimensions.y} × {customDimensions.z} mm • Scale: {scalePercentage}%
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Preset Views in Fullscreen */}
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-1 bg-[#28292E] p-1 rounded-xl border border-[#3A3C42] text-xs font-mono">
+              <span className="px-2 text-stone-400 flex items-center gap-1 text-[11px]">
+                <Compass className="w-3.5 h-3.5 text-[#D1CFB9]" /> View:
+              </span>
+              <button
+                type="button"
+                onClick={() => setCameraView('iso')}
+                className="px-2.5 py-1 rounded-lg hover:bg-[#383A42] text-stone-200 transition-colors cursor-pointer"
+              >
+                Isometric
+              </button>
+              <button
+                type="button"
+                onClick={() => setCameraView('front')}
+                className="px-2.5 py-1 rounded-lg hover:bg-[#383A42] text-stone-200 transition-colors cursor-pointer"
+              >
+                Front
+              </button>
+              <button
+                type="button"
+                onClick={() => setCameraView('side')}
+                className="px-2.5 py-1 rounded-lg hover:bg-[#383A42] text-stone-200 transition-colors cursor-pointer"
+              >
+                Side
+              </button>
+              <button
+                type="button"
+                onClick={() => setCameraView('top')}
+                className="px-2.5 py-1 rounded-lg hover:bg-[#383A42] text-stone-200 transition-colors cursor-pointer"
+              >
+                Top
+              </button>
+            </div>
+
+            {/* Studio Environment Switcher */}
+            <div className="flex items-center bg-[#28292E] p-1 rounded-xl border border-[#3A3C42]">
+              <button
+                type="button"
+                onClick={() => setEnvironmentTheme('light')}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  environmentTheme === 'light'
+                    ? 'bg-[#5A5A40] text-white'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+                title="Studio Light Environment"
+              >
+                <Sun className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnvironmentTheme('dark')}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  environmentTheme === 'dark'
+                    ? 'bg-[#5A5A40] text-white'
+                    : 'text-stone-400 hover:text-white'
+                }`}
+                title="Dark Industrial Forge"
+              >
+                <Moon className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Exit Full Screen Button */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="flex items-center gap-1.5 bg-[#5A5A40] hover:bg-[#6D6D4E] text-[#FAF9F6] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer ml-2"
+            >
+              <Minimize2 className="w-4 h-4 text-[#D1CFB9]" />
+              <span>Exit Fullscreen</span>
+              <kbd className="hidden md:inline bg-black/30 text-[10px] px-1.5 py-0.5 rounded font-mono font-normal">
+                ESC
+              </kbd>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3D WebGL Canvas Container */}
       <div
         ref={mountRef}
-        className={`w-full ${height} cursor-grab active:cursor-grabbing`}
+        className={`w-full cursor-grab active:cursor-grabbing ${
+          isFullscreen ? 'flex-1 h-full' : 'h-full'
+        }`}
       />
 
-      {/* Top Floating Controls Bar */}
-      <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full shadow-md border border-[#E5E2D9] text-xs text-[#2C2C2C] z-10">
-        {/* Layer / Wireframe Slicer Toggle */}
+      {/* FLOATING TOP-RIGHT CONTROLS (Always accessible) */}
+      <div
+        className={`absolute flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border shadow-xs text-xs font-semibold z-20 ${
+          isFullscreen
+            ? 'top-20 right-6 bg-[#28292E]/90 border-[#3A3C42] text-stone-200 backdrop-blur-md'
+            : 'top-3 right-3 bg-white/90 border-[#E5E2D9] text-[#4A4A4A] backdrop-blur-md'
+        }`}
+      >
+        {/* Wireframe / Solid Mode */}
         <button
           type="button"
-          onClick={() => setWireframe(!wireframe)}
-          title="Toggle 3D Print Layer Mesh Slicer"
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-            wireframe
-              ? 'bg-[#5A5A40] text-white shadow-xs'
-              : 'hover:bg-[#F7F6F2] text-[#4A4A4A]'
+          onClick={() => setRenderMode(renderMode === 'solid' ? 'wireframe' : 'solid')}
+          className={`px-2.5 py-1 rounded-full transition-colors cursor-pointer flex items-center gap-1 ${
+            renderMode === 'wireframe'
+              ? 'bg-[#2C2C2C] text-[#FAF9F6]'
+              : 'hover:bg-[#F2F0EA] text-[#2C2C2C]'
           }`}
+          title="Toggle Wireframe Mesh"
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>{wireframe ? 'Mesh Slices' : 'Solid Render'}</span>
+          <span>{renderMode === 'wireframe' ? 'Wireframe' : 'Solid'}</span>
         </button>
 
-        {/* Auto-Rotation Toggle */}
+        <span className="text-[#8E9299]/40">|</span>
+
+        {/* Auto Rotation */}
         <button
           type="button"
           onClick={() => setIsRotating(!isRotating)}
-          title="Toggle Auto 360° Rotation"
-          className={`p-1.5 rounded-full transition-colors ${
+          className={`p-1.5 rounded-full transition-colors cursor-pointer ${
             isRotating
-              ? 'text-[#5A5A40] bg-[#F7F6F2]'
-              : 'text-[#8E9299] hover:bg-[#F7F6F2]'
+              ? 'text-[#5A5A40] bg-[#F2F0EA]'
+              : 'text-stone-400 hover:text-stone-700'
           }`}
+          title="Toggle 360° Turntable Rotation"
         >
-          <RotateCw className={`w-3.5 h-3.5 ${isRotating ? 'animate-spin' : ''}`} />
+          <RotateCw className="w-3.5 h-3.5" />
         </button>
 
         {/* Zoom In */}
         <button
           type="button"
-          onClick={() => handleZoom('in')}
-          title="Zoom In 3D Model"
-          className="p-1.5 text-[#4A4A4A] hover:text-[#2C2C2C] hover:bg-[#F7F6F2] rounded-full"
+          onClick={() => handleZoom(-4)}
+          className="p-1.5 rounded-full hover:bg-[#F2F0EA] text-stone-600 transition-colors cursor-pointer"
+          title="Zoom In"
         >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
@@ -684,42 +597,214 @@ export const ThreeDViewer: React.FC<ThreeDViewerProps> = ({
         {/* Zoom Out */}
         <button
           type="button"
-          onClick={() => handleZoom('out')}
-          title="Zoom Out 3D Model"
-          className="p-1.5 text-[#4A4A4A] hover:text-[#2C2C2C] hover:bg-[#F7F6F2] rounded-full"
+          onClick={() => handleZoom(4)}
+          className="p-1.5 rounded-full hover:bg-[#F2F0EA] text-stone-600 transition-colors cursor-pointer"
+          title="Zoom Out"
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
 
-        {/* Reset Camera View */}
+        {/* Reset Camera */}
         <button
           type="button"
           onClick={handleResetCamera}
+          className="p-1.5 rounded-full hover:bg-[#F2F0EA] text-stone-600 transition-colors cursor-pointer"
           title="Reset Camera Angle"
-          className="p-1.5 text-[#4A4A4A] hover:text-[#2C2C2C] hover:bg-[#F7F6F2] rounded-full"
         >
           <RefreshCcw className="w-3.5 h-3.5" />
         </button>
+
+        <span className="text-[#8E9299]/40">|</span>
+
+        {/* FULLSCREEN TOGGLE BUTTON */}
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className="p-1.5 rounded-full bg-[#5A5A40] text-[#FAF9F6] hover:bg-[#6D6D4E] transition-colors cursor-pointer shadow-xs flex items-center gap-1 px-2"
+          title={isFullscreen ? 'Exit Full Screen' : 'Expand to Full Screen View'}
+        >
+          {isFullscreen ? (
+            <>
+              <Minimize2 className="w-3.5 h-3.5 text-[#D1CFB9]" />
+              <span className="text-[10px] font-bold">Exit</span>
+            </>
+          ) : (
+            <>
+              <Maximize2 className="w-3.5 h-3.5 text-[#D1CFB9]" />
+              <span className="text-[10px] font-bold">Full Screen</span>
+            </>
+          )}
+        </button>
       </div>
 
-      {/* Bottom Floating Dimension & Material Indicator */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none z-10">
-        <div className="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl border border-[#E5E2D9] shadow-xs text-[11px] font-mono text-[#2C2C2C] flex items-center gap-2 pointer-events-auto">
-          <div
-            className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs"
+      {/* BOTTOM FLOATING INFO OVERLAYS */}
+      <div
+        className={`absolute flex items-center gap-2 pointer-events-none z-20 ${
+          isFullscreen ? 'bottom-6 left-6' : 'bottom-3 left-3'
+        }`}
+      >
+        <div
+          className={`backdrop-blur-md px-3.5 py-1.5 rounded-full border text-[11px] font-mono flex items-center gap-2 shadow-xs ${
+            isFullscreen
+              ? 'bg-[#28292E]/95 border-[#3A3C42] text-white'
+              : 'bg-white/95 border-[#E5E2D9] text-[#2C2C2C]'
+          }`}
+        >
+          <span
+            className="w-3 h-3 rounded-full shadow-xs border border-white/20"
             style={{ backgroundColor: colorHex }}
           />
-          <span className="font-semibold">{materialFinish}</span>
-          <span className="text-[#8E9299]">|</span>
-          <span className="text-[#5A5A40] font-bold">0.08mm Layer Res</span>
+          <span className="font-semibold">{materialFinish.split(' ')[0]}</span>
+          <span className="text-stone-400">|</span>
+          <span>0.08mm Resolution</span>
         </div>
-
-        {customDimensions && (
-          <div className="bg-[#2C2C2C]/90 text-[#D1CFB9] backdrop-blur-md px-3 py-1.5 rounded-xl border border-[#5A5A40]/40 shadow-xs text-[10px] font-mono pointer-events-auto hidden sm:block">
-            {customDimensions.x} × {customDimensions.y} × {customDimensions.z} mm
-          </div>
-        )}
       </div>
+
+      {customDimensions && (
+        <div
+          className={`absolute pointer-events-none z-20 ${
+            isFullscreen ? 'bottom-6 right-6' : 'bottom-3 right-3'
+          }`}
+        >
+          <div
+            className={`backdrop-blur-md px-3.5 py-1.5 rounded-xl text-[11px] font-mono shadow-xs border ${
+              isFullscreen
+                ? 'bg-[#28292E]/95 border-[#3A3C42] text-[#FAF9F6]'
+                : 'bg-[#2C2C2C]/90 border-black text-white'
+            }`}
+          >
+            <span>
+              {customDimensions.x} × {customDimensions.y} × {customDimensions.z} mm
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+function buildActiveModel(
+  group: THREE.Group,
+  uploadedGeometry: THREE.BufferGeometry | null,
+  geometryType: string,
+  mat: THREE.MeshStandardMaterial,
+  scalePercentage: number
+) {
+  // Clear previous children
+  while (group.children.length > 0) {
+    group.remove(group.children[0]);
+  }
+
+  if (uploadedGeometry) {
+    // Clone and prepare uploaded geometry
+    const geo = uploadedGeometry.clone();
+    geo.computeBoundingBox();
+    geo.computeVertexNormals();
+
+    const bbox = geo.boundingBox || new THREE.Box3();
+    geo.center(); // Center at (0, 0, 0)
+
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+
+    // Max visual dimension on 3D plate ~11 units
+    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+    const fitScale = 11 / maxDim;
+    geo.scale(fitScale, fitScale, fitScale);
+    geo.computeBoundingBox();
+
+    const newBbox = geo.boundingBox!;
+    const bottomY = newBbox.min.y;
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Align bottom exactly with print bed at y = -5.9
+    mesh.position.y = -5.9 - bottomY;
+
+    group.add(mesh);
+
+    const s = scalePercentage / 100;
+    group.scale.set(s, s, s);
+    return;
+  }
+
+  // Fallback Procedural Geometries when no uploaded CAD file is active
+  switch (geometryType) {
+    case 'anime_figure':
+    case 'anime_hero': {
+      const figureGroup = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 6, 1.2, 32), mat);
+      base.position.y = -5.4;
+      base.castShadow = true;
+      figureGroup.add(base);
+
+      const torso = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4.2, 16), mat);
+      torso.position.y = 0.2;
+      torso.rotation.x = Math.PI;
+      torso.castShadow = true;
+      figureGroup.add(torso);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(1.4, 24, 20), mat);
+      head.position.y = 2.8;
+      head.castShadow = true;
+      figureGroup.add(head);
+
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.2, 9.0, 0.5), mat);
+      blade.position.set(2.6, 1.2, 1.2);
+      blade.rotation.z = -0.4;
+      figureGroup.add(blade);
+      group.add(figureGroup);
+      break;
+    }
+
+    case 'dragon':
+    case 'flexi_dragon': {
+      const dragonGeo = new THREE.TorusKnotGeometry(4.2, 1.2, 128, 24, 2, 5);
+      const dragonMesh = new THREE.Mesh(dragonGeo, mat);
+      dragonMesh.position.y = -0.5;
+      dragonMesh.castShadow = true;
+      group.add(dragonMesh);
+      break;
+    }
+
+    case 'wall_art':
+    case 'wave_wall': {
+      const waveGeo = new THREE.PlaneGeometry(16, 12, 40, 30);
+      const pos = waveGeo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const u = pos.getX(i);
+        const v = pos.getY(i);
+        const z = Math.sin(u * 0.5) * Math.cos(v * 0.6) * 1.8 + Math.sin(u * 0.9) * 0.8;
+        pos.setZ(i, z);
+      }
+      waveGeo.computeVertexNormals();
+      const waveMesh = new THREE.Mesh(waveGeo, mat);
+      waveMesh.rotation.x = -Math.PI / 4;
+      waveMesh.position.y = 0;
+      waveMesh.castShadow = true;
+      group.add(waveMesh);
+      break;
+    }
+
+    case 'spiral_vase':
+    default: {
+      const points: THREE.Vector2[] = [];
+      for (let i = 0; i <= 30; i++) {
+        const t = i / 30;
+        const y = (t - 0.5) * 12;
+        const radius = 2.8 + Math.sin(t * Math.PI * 2.5) * 1.6 + Math.cos(t * Math.PI * 4) * 0.3;
+        points.push(new THREE.Vector2(radius, y));
+      }
+      const vaseGeo = new THREE.LatheGeometry(points, 48);
+      const vaseMesh = new THREE.Mesh(vaseGeo, mat);
+      vaseMesh.position.y = 0;
+      vaseMesh.castShadow = true;
+      group.add(vaseMesh);
+      break;
+    }
+  }
+
+  const s = scalePercentage / 100;
+  group.scale.set(s, s, s);
+}

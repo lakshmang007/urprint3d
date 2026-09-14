@@ -52,6 +52,7 @@ interface StoreContextType {
   // Products Catalog (Firebase Synced)
   products: Product[];
   isLoadingProducts: boolean;
+  refreshProducts: () => Promise<void>;
   isFirebaseConnected: boolean;
   addProduct: (product: Product) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
@@ -152,7 +153,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const productsRef = useRef<Product[]>(PRODUCTS);
   productsRef.current = products;
 
-  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
 
   // Store & UI Settings State (Persisted in localStorage)
@@ -271,6 +272,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let isMounted = true;
 
     async function initCatalog() {
+      setIsLoadingProducts(true);
       try {
         const initialProds = await initializeFirestoreCatalog();
         if (isMounted && initialProds && initialProds.length > 0) {
@@ -315,6 +317,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       } catch (err) {
         console.warn('Firebase sync notice:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingProducts(false);
+        }
       }
     }
 
@@ -381,6 +387,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const resetCatalogToDefaults = async () => {
     setProducts(PRODUCTS);
     await resetFirestoreCatalog();
+  };
+
+  const refreshProducts = async () => {
+    setIsLoadingProducts(true);
+    try {
+      // Allow realistic fetch timing for perceived responsiveness
+      const start = Date.now();
+      const freshProds = await initializeFirestoreCatalog();
+      const elapsed = Date.now() - start;
+      if (elapsed < 600) {
+        await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
+      }
+      if (freshProds && freshProds.length > 0) {
+        setProducts(freshProds);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh products:', err);
+    } finally {
+      setIsLoadingProducts(false);
+    }
   };
 
   const refreshCustomUploads = async () => {
@@ -594,6 +620,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       value={{
         products,
         isLoadingProducts,
+        refreshProducts,
         isFirebaseConnected,
         addProduct,
         updateProduct,

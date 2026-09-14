@@ -34,6 +34,7 @@ export const QuickViewModal: React.FC = () => {
                 geometryType={product.stlGeometryType}
                 colorHex={product.colors[0].hex}
                 height="h-[340px]"
+                modelTitle={product.name}
               />
             )}
 

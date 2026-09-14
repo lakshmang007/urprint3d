@@ -3,6 +3,7 @@ import { useStore } from '../context/StoreContext';
 import { MATERIAL_OPTIONS } from '../data/materials';
 import { CURRENCIES } from '../data/currencies';
 import { ProductCard } from './ProductCard';
+import { ProductCardSkeletonGrid } from './ProductCardSkeleton';
 import {
   Filter,
   SlidersHorizontal,
@@ -21,6 +22,8 @@ export const CatalogPage: React.FC = () => {
     resetFilters,
     currency,
     products,
+    isLoadingProducts,
+    refreshProducts,
     setIsManageModalOpen,
     isFirebaseConnected,
   } = useStore();
@@ -317,8 +320,18 @@ export const CatalogPage: React.FC = () => {
                   )}
               </div>
 
-              {/* Sort By Dropdown */}
+              {/* Sort By Dropdown & Refresh */}
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  id="catalog-refresh-btn"
+                  onClick={() => refreshProducts()}
+                  disabled={isLoadingProducts}
+                  className="p-2 rounded-lg bg-stone-50 hover:bg-stone-100 border border-stone-300 text-stone-700 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Reload models from database"
+                >
+                  <RotateCcw className={`w-4 h-4 ${isLoadingProducts ? 'animate-spin text-[#5A5A40]' : ''}`} />
+                </button>
+
                 <span className="text-stone-500 font-semibold">Sort By:</span>
                 <select
                   value={filterState.sort}
@@ -337,8 +350,10 @@ export const CatalogPage: React.FC = () => {
             </div>
 
             {/* Product Grid */}
-            {filteredProducts.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {isLoadingProducts ? (
+              <ProductCardSkeletonGrid id="catalog-products-skeleton-grid" count={6} />
+            ) : filteredProducts.length > 0 ? (
+              <div id="catalog-products-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredProducts.map((prod) => (
                   <ProductCard key={prod.id} product={prod} />
                 ))}

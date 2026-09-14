@@ -16,7 +16,15 @@ import {
   MapPin,
   QrCode,
   Smartphone,
+  Loader2,
+  ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
+import {
+  fetchRazorpayConfig,
+  initiateRazorpayCheckout,
+  RazorpayConfigResponse,
+} from '../services/razorpayService';
 
 const INDIAN_STATES = [
   'Andhra Pradesh',
@@ -108,13 +116,24 @@ export const CheckoutPage: React.FC = () => {
   const [shippingFee, setShippingFee] = useState<number>(standardShippingFee);
   const [shippingType, setShippingType] = useState<'standard' | 'priority' | 'pickup'>('standard');
 
-  // Payment State
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('upi');
+  // Payment State - Default to Razorpay Indian Gateway
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('razorpay');
   const [upiId, setUpiId] = useState('aarav@okaxis');
   const [selectedBank, setSelectedBank] = useState('HDFC Bank');
   const [cardNumber, setCardNumber] = useState('4532 •••• •••• 8821');
   const [cardExpiry, setCardExpiry] = useState('08/29');
   const [cardCvc, setCardCvc] = useState('523');
+
+  // Razorpay Gateway State
+  const [isProcessingRazorpay, setIsProcessingRazorpay] = useState(false);
+  const [razorpayError, setRazorpayError] = useState<string | null>(null);
+  const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfigResponse | null>(null);
+
+  React.useEffect(() => {
+    fetchRazorpayConfig()
+      .then(setRazorpayConfig)
+      .catch((err) => console.warn('Razorpay config load notice:', err));
+  }, []);
 
   // Promo Code State
   const [promoCode, setPromoCode] = useState('');
@@ -142,7 +161,69 @@ export const CheckoutPage: React.FC = () => {
   const giftFee = giftWrapping ? 99 : 0;
   const totalINR = Math.max(0, cartSubtotalUSD + shippingFee + giftFee - discountAmount);
 
+  const handleRazorpayPayment = () => {
+    if (!address.fullName.trim() || !address.addressLine1.trim() || !address.postalCode.trim()) {
+      setStep('details');
+      return;
+    }
+
+    setIsProcessingRazorpay(true);
+    setRazorpayError(null);
+
+    initiateRazorpayCheckout({
+      amountINR: totalINR,
+      customer: {
+        name: address.fullName,
+        email: address.email,
+        phone: address.phone,
+      },
+      orderNotes: {
+        city: address.state,
+        pincode: address.postalCode,
+        hub: 'UrPrint Slicing Grid',
+      },
+      onSuccess: (result) => {
+        setIsProcessingRazorpay(false);
+        confetti({
+          particleCount: 140,
+          spread: 80,
+          origin: { y: 0.6 },
+        });
+
+        placeOrder({
+          items: cart,
+          subtotal: cartSubtotalUSD,
+          shippingFee,
+          taxAmount: 0,
+          giftWrappingFee: giftFee,
+          discountAmount,
+          total: totalINR,
+          currency: 'INR',
+          shippingAddress: address,
+          paymentMethod: 'razorpay',
+          razorpayPaymentId: result.paymentId,
+          razorpayOrderId: result.orderId,
+          razorpaySignature: result.signature,
+          paymentStatus: 'paid',
+          giftNote: giftWrapping ? giftNote : undefined,
+        });
+      },
+      onError: (errMsg) => {
+        setIsProcessingRazorpay(false);
+        setRazorpayError(errMsg || 'Razorpay payment was not completed.');
+      },
+      onDismiss: () => {
+        setIsProcessingRazorpay(false);
+      },
+    });
+  };
+
   const handleSubmitOrder = () => {
+    if (paymentMethod === 'razorpay') {
+      handleRazorpayPayment();
+      return;
+    }
+
     confetti({
       particleCount: 120,
       spread: 70,
@@ -160,6 +241,7 @@ export const CheckoutPage: React.FC = () => {
       currency: 'INR',
       shippingAddress: address,
       paymentMethod,
+      paymentStatus: paymentMethod === 'cod' ? 'cod' : 'pending',
       giftNote: giftWrapping ? giftNote : undefined,
     });
   };
@@ -465,32 +547,146 @@ export const CheckoutPage: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Payment Options (UPI, Cards, NetBanking, COD) */}
-                <div className="grid grid-cols-2 gap-2.5 text-xs font-bold">
-                  {[
-                    { id: 'upi', label: 'UPI / QR (GPay, PhonePe, Paytm)', icon: Smartphone },
-                    { id: 'card', label: 'RuPay / Visa / Master Cards', icon: CreditCard },
-                    { id: 'apple_pay', label: 'Net Banking (All Indian Banks)', icon: ShieldCheck },
-                    { id: 'cod', label: 'Cash on Delivery (COD)', icon: Building },
-                  ].map((pm) => {
-                    const IconComp = pm.icon;
-                    return (
-                      <button
-                        key={pm.id}
-                        type="button"
-                        onClick={() => setPaymentMethod(pm.id as PaymentMethod)}
-                        className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-left transition-all ${
-                          paymentMethod === pm.id
-                            ? 'border-[#5A5A40] bg-[#F7F6F2] font-bold text-[#2C2C2C] shadow-xs'
-                            : 'border-[#E5E2D9] hover:border-[#8E9299] text-[#4A4A4A]'
-                        }`}
-                      >
-                        <IconComp className="w-4 h-4 text-[#5A5A40] shrink-0" />
-                        <span className="text-xs leading-tight">{pm.label}</span>
-                      </button>
-                    );
-                  })}
+                {/* Payment Options */}
+                <div className="space-y-2.5">
+                  {/* Top Featured: Razorpay */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('razorpay')}
+                    className={`w-full p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left transition-all ${
+                      paymentMethod === 'razorpay'
+                        ? 'border-[#0c2340] bg-[#F0F4F8] font-bold text-[#0c2340] ring-1 ring-[#0c2340]'
+                        : 'border-[#E5E2D9] hover:border-[#8E9299] text-[#2C2C2C] bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-[#0c2340] text-white flex items-center justify-center shrink-0">
+                        <ShieldCheck className="w-5 h-5 text-[#3399cc]" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-[#0c2340]">Razorpay Gateway</span>
+                          <span className="text-[10px] bg-[#3399cc]/15 text-[#0c2340] px-2 py-0.5 rounded-full font-mono font-bold">
+                            RECOMMENDED
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#555] mt-0.5">
+                          Instant UPI (GPay, PhonePe, Paytm), RuPay/Visa/MasterCard, 50+ Banks NetBanking, CRED & Wallets
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0 text-[10px] font-mono font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                      <span>Instant 0% Surcharge</span>
+                    </div>
+                  </button>
+
+                  {/* Alternative Methods Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
+                    {[
+                      { id: 'upi', label: 'UPI Direct (VPA)', icon: Smartphone },
+                      { id: 'card', label: 'Manual Card Entry', icon: CreditCard },
+                      { id: 'apple_pay', label: 'Bank Portal', icon: Building },
+                      { id: 'cod', label: 'Cash on Delivery', icon: Truck },
+                    ].map((pm) => {
+                      const IconComp = pm.icon;
+                      return (
+                        <button
+                          key={pm.id}
+                          type="button"
+                          onClick={() => setPaymentMethod(pm.id as PaymentMethod)}
+                          className={`p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${
+                            paymentMethod === pm.id
+                              ? 'border-[#5A5A40] bg-[#F7F6F2] font-bold text-[#2C2C2C] shadow-xs'
+                              : 'border-[#E5E2D9] hover:border-[#8E9299] text-[#4A4A4A]'
+                          }`}
+                        >
+                          <IconComp className="w-4 h-4 text-[#5A5A40] shrink-0" />
+                          <span className="text-xs leading-tight">{pm.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {/* Razorpay Interface */}
+                {paymentMethod === 'razorpay' && (
+                  <div className="space-y-4 bg-[#F0F4F8]/70 p-5 rounded-2xl border border-[#D0DCE5]">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#D0DCE5] pb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="font-serif font-black text-sm text-[#0c2340] tracking-tight">
+                          Razorpay <span className="text-[#3399cc] font-sans font-bold text-xs uppercase tracking-wider">Secure</span>
+                        </div>
+                        <span className="text-[10px] text-stone-500 font-mono">| RBI Authorized</span>
+                      </div>
+
+                      {/* Server Config Status */}
+                      <div className="flex items-center gap-1.5 text-[11px]">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="font-mono text-emerald-800 text-[10px] font-bold">
+                          {razorpayConfig?.isConfigured
+                            ? 'Live Gateway Connected'
+                            : 'Test Sandbox Ready'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <div className="bg-white p-2.5 rounded-xl border border-[#D0DCE5] text-center">
+                        <p className="font-bold text-[#0c2340]">UPI Apps</p>
+                        <p className="text-[10px] text-stone-500">GPay, PhonePe, Paytm</p>
+                      </div>
+                      <div className="bg-white p-2.5 rounded-xl border border-[#D0DCE5] text-center">
+                        <p className="font-bold text-[#0c2340]">All Cards</p>
+                        <p className="text-[10px] text-stone-500">RuPay, Visa, Master</p>
+                      </div>
+                      <div className="bg-white p-2.5 rounded-xl border border-[#D0DCE5] text-center">
+                        <p className="font-bold text-[#0c2340]">NetBanking</p>
+                        <p className="text-[10px] text-stone-500">50+ Indian Banks</p>
+                      </div>
+                      <div className="bg-white p-2.5 rounded-xl border border-[#D0DCE5] text-center">
+                        <p className="font-bold text-[#0c2340]">Wallets</p>
+                        <p className="text-[10px] text-stone-500">CRED, Amazon, Mobi</p>
+                      </div>
+                    </div>
+
+                    {razorpayError && (
+                      <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                        <span>{razorpayError}</span>
+                      </div>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        disabled={isProcessingRazorpay}
+                        onClick={handleRazorpayPayment}
+                        className="w-full bg-[#0c2340] hover:bg-[#153a66] disabled:opacity-75 text-white font-bold text-sm py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                      >
+                        {isProcessingRazorpay ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin text-[#3399cc]" />
+                            <span>Opening Razorpay Secure Window...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4 text-[#3399cc]" />
+                            <span>Pay ₹{totalINR.toLocaleString('en-IN')} with Razorpay</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-4 text-[10px] text-stone-500 font-mono">
+                      <span>🔒 256-Bit SSL Encrypted</span>
+                      <span>•</span>
+                      <span>PCI-DSS Level 1 Compliant</span>
+                      <span>•</span>
+                      <span>Zero Storage of Card PINs</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* UPI Interface */}
                 {paymentMethod === 'upi' && (
@@ -608,14 +804,16 @@ export const CheckoutPage: React.FC = () => {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={handleSubmitOrder}
-                  className="w-full bg-[#2C2C2C] hover:bg-[#444444] text-white font-bold text-sm py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
-                >
-                  <Lock className="w-4 h-4 text-[#D1CFB9]" />
-                  <span>Confirm & Place Order (₹{totalINR.toLocaleString('en-IN')})</span>
-                </button>
+                {paymentMethod !== 'razorpay' && (
+                  <button
+                    type="button"
+                    onClick={handleSubmitOrder}
+                    className="w-full bg-[#2C2C2C] hover:bg-[#444444] text-white font-bold text-sm py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Lock className="w-4 h-4 text-[#D1CFB9]" />
+                    <span>Confirm & Place Order (₹{totalINR.toLocaleString('en-IN')})</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
